@@ -6,10 +6,12 @@ package freechips.rocketchip.rocket
 import chisel3._
 import chisel3.util.Valid
 
-class RocketInstructionObservation(addressBits: Int) extends Bundle {
+class RocketInstructionObservation(addressBits: Int, commandBits: Int) extends Bundle {
   val token = UInt(64.W)
   val pc = UInt(addressBits.W)
   val instruction = UInt(32.W)
+  val memory = Bool()
+  val memoryCommand = UInt(commandBits.W)
 }
 
 class RocketMemoryRequestObservation(widths: DCacheObservationWidths) extends Bundle {
@@ -21,7 +23,7 @@ class RocketMemoryRequestObservation(widths: DCacheObservationWidths) extends Bu
 }
 
 class RocketRetirementObservation(widths: DCacheObservationWidths) extends Bundle {
-  val instruction = new RocketInstructionObservation(widths.addressBits)
+  val instruction = new RocketInstructionObservation(widths.addressBits, widths.commandBits)
   val integerWrite = Bool()
   val deferredIntegerWrite = Bool()
   val destination = UInt(5.W)
@@ -49,7 +51,7 @@ class RocketTrapObservation(addressBits: Int, causeBits: Int) extends Bundle {
 // collector must retain both timestamps and wait for the matching final value.
 class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) extends Bundle {
   val hart = UInt(hartBits.W)
-  val allocate = Valid(new RocketInstructionObservation(widths.addressBits))
+  val allocate = Valid(new RocketInstructionObservation(widths.addressBits, widths.commandBits))
   val request = Valid(new RocketMemoryRequestObservation(widths))
   val executeKilled = Valid(UInt(64.W))
   val memoryKilled = Valid(UInt(64.W))

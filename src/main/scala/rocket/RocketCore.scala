@@ -1239,6 +1239,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.allocate.bits.token := nextToken
     observation.allocate.bits.pc := ibuf.io.pc.asSInt.pad(xLen).asUInt
     observation.allocate.bits.instruction := id_raw_inst(0)
+    observation.allocate.bits.memory := id_ctrl.mem
+    observation.allocate.bits.memoryCommand := id_ctrl.mem_cmd
     observation.request.valid := capture && io.dmem.req.fire && exKnown
     observation.request.bits.token := exToken
     observation.request.bits.tag := io.dmem.req.bits.tag
