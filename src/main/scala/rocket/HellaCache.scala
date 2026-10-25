@@ -61,6 +61,9 @@ case class DCacheParams(
     require(isPow2(nSets), s"nSets($nSets) must be pow2")
 }
 
+// Optional native observation only; enabling it does not enable a checker.
+case object EnableDifftestRocketCache extends Field[Boolean](false)
+
 trait HasL1HellaCacheParameters extends HasL1CacheParameters with HasCoreParameters {
   val cacheParams = tileParams.dcache.get
   val cfg = cacheParams
@@ -234,6 +237,9 @@ class HellaCacheBundle(implicit p: Parameters) extends CoreBundle()(p) {
   val ptw = new TLBPTWIO()
   val errors = new DCacheErrors
   val tlb_port = new DCacheTLBPort
+  val difftest = p(EnableDifftestRocketCache).option(Output(new DCacheObservation(
+    DCacheObservationWidths(vaddrBitsExtended max paddrBits, coreDataBits,
+      new HellaCacheReq().tag.getWidth, new HellaCacheReq().cmd.getWidth, new HellaCacheReq().size.getWidth))))
 }
 
 class HellaCacheModule(outer: HellaCache) extends LazyModuleImp(outer)
@@ -241,6 +247,8 @@ class HellaCacheModule(outer: HellaCache) extends LazyModuleImp(outer)
   implicit val edge: TLEdgeOut = outer.node.edges.out(0)
   val (tl_out, _) = outer.node.out(0)
   val io = IO(new HellaCacheBundle)
+  // Implementations without observation support remain explicitly unavailable.
+  io.difftest.foreach { observation => observation := 0.U.asTypeOf(observation) }
   val io_hartid = outer.hartIdSinkNodeOpt.map(_.bundle)
   val io_mmio_address_prefix = outer.mmioAddressPrefixSinkNodeOpt.map(_.bundle)
   dontTouch(io.cpu.resp) // Users like to monitor these fields even if the core ignores some signals

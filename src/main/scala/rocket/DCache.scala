@@ -103,6 +103,8 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   require(eccBytes == 1 || !dECC.isInstanceOf[IdentityCode])
   require(cacheParams.silentDrop || cacheParams.acquireBeforeRelease, "!silentDrop requires acquireBeforeRelease")
   val usingRMW = eccBytes > 1 || usingAtomicsInCache
+  require(!p(EnableDifftestRocketCache) || !usingDataScratchpad,
+    "Difftest cache observation does not support scratchpad maintenance writes")
   val mmioOffset = outer.firstMMIO
   edge.manager.requireFifo(TLFIFOFixer.allVolatile)  // TileLink pipelining MMIO requests
 
@@ -234,6 +236,17 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   val uncachedInFlight = RegInit(VecInit(Seq.fill(maxUncachedInFlight)(false.B)))
   val uncachedReqs = Reg(Vec(maxUncachedInFlight, new HellaCacheReq))
   val uncachedResp = WireInit(new HellaCacheReq, DontCare)
+
+  val observationIds = io.difftest.map { _ =>
+    val next = RegInit(1.U(64.W))
+    when (io.cpu.req.fire) {
+      assert(!next.andR, "Difftest cache request ID exhausted")
+      next := next + 1.U
+    }
+    val s1 = RegEnable(next, io.cpu.req.fire)
+    val s2 = RegEnable(s1, s1_valid_not_nacked)
+    (next, s1, s2)
+  }
 
   // hit initiation path
   val s0_read = isRead(io.cpu.req.bits.cmd)
@@ -553,6 +566,58 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     FillInterleaved(wordBytes/subWordBytes, wordMask) & Fill(rowBytes/wordBytes, eccMask)
   }
   dataArb.io.in(0).bits.eccMask := eccMask(Mux(pstore2_valid, pstore2_storegen_mask, pstore1_mask))
+
+  io.difftest.zip(observationIds).foreach { case (observation, (requestId, s1Id, s2Id)) =>
+    def access(out: DCacheAccessObservation, req: HellaCacheReqInternal, id: UInt): Unit = {
+      out.requestId := id
+      out.address := req.addr
+      out.tag := req.tag
+      out.command := req.cmd
+      out.size := req.size
+    }
+
+    // Keep the physical address beside the virtual SRAM index, following exactly
+    // the same enables as the pending-store data. A merged entry's requestId is
+    // only its initial member; storeMerge lets the collector retain all members.
+    val pstore1Id = RegEnable(s1Id, s1_valid_not_nacked && s1_write)
+    val pstore1Paddr = RegEnable(s1_paddr, s1_valid_not_nacked && s1_write)
+    val pstore2Id = RegEnable(pstore1Id, advance_pstore1)
+    val pstore2Paddr = RegEnable(Mux(s2_correct, s2_req.addr, pstore1Paddr), advance_pstore1)
+    val pstore2Maintenance = RegEnable(s2_correct, advance_pstore1)
+
+    observation.available := true.B
+    observation.request.valid := io.cpu.req.fire
+    access(observation.request.bits.access, io.cpu.req.bits, requestId)
+    observation.request.bits.arrayRead := dataArb.io.in(3).fire
+    observation.s1Rejected.valid := s1_valid && (io.cpu.s1_kill || s1_nack)
+    observation.s1Rejected.bits := s1Id
+    observation.result.valid := s2_valid_not_nacked_in_s1
+    access(observation.result.bits.access, s2_req, s2Id)
+    observation.result.bits.hit := s2_valid_hit
+    observation.result.bits.cached := !s2_uncached
+    observation.result.bits.killed := io.cpu.s2_kill
+    observation.result.bits.nacked := io.cpu.s2_nack
+    observation.result.bits.exception := io.cpu.s2_xcpt.asUInt.orR
+    observation.load.valid := s2_valid_not_killed && s2_valid_hit && s2_read && !s2_write && !s2_uncached
+    access(observation.load.bits.access, s2_req, s2Id)
+    observation.load.bits.rawData := io.cpu.resp.bits.data_raw
+    observation.load.bits.data := io.cpu.resp.bits.data
+    observation.storeAccepted.valid := s2_store_valid
+    observation.storeAccepted.bits.requestId := s2Id
+    observation.storeAccepted.bits.address := s2_req.addr
+    observation.storeAccepted.bits.data := pstore1_data
+    observation.storeAccepted.bits.mask := pstore1_mask
+    observation.storeAdvance := advance_pstore1
+    observation.storeMerge := pstore1_merge
+    observation.storeDrain.valid := dataArb.io.in(0).fire && dataArb.io.in(0).bits.write
+    observation.storeDrain.bits.store.requestId := Mux(pstore2_valid, pstore2Id, pstore1Id)
+    observation.storeDrain.bits.store.address := Mux(pstore2_valid, pstore2Paddr, pstore1Paddr)
+    observation.storeDrain.bits.store.data := Mux(pstore2_valid, pstore2_storegen_data, pstore1_data)
+    observation.storeDrain.bits.store.mask := Mux(pstore2_valid, pstore2_storegen_mask, pstore1_mask)
+    observation.storeDrain.bits.secondSlot := pstore2_valid
+    observation.storeDrain.bits.maintenance := pstore2_valid && pstore2Maintenance
+    dontTouch(observation)
+  }
 
   // store->load RAW hazard detection
   def s1Depends(addr: UInt, mask: UInt) =
