@@ -3,6 +3,8 @@
 
 package freechips.rocketchip.tile
 
+import freechips.rocketchip.rocket.EnableDifftestRocketCache
+
 import chisel3._
 
 import org.chipsalliance.cde.config._
@@ -232,6 +234,8 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
 
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.imem
+  val difftestCoreRequestor = p(EnableDifftestRocketCache).option(IO(Output(UInt(32.W))))
+  difftestCoreRequestor.foreach(_ := dcachePorts.size.U)
   dcachePorts += core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??
   fpuOpt foreach { fpu =>
     core.io.fpu :<>= fpu.io.waiveAs[FPUCoreIO](_.cp_req, _.cp_resp)
@@ -281,6 +285,8 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
   require(h == c, s"port list size was $h, core expected $c")
   require(h == o, s"port list size was $h, outer counted $o")
   // TODO figure out how to move the below into their respective mix-ins
+  val difftestCacheRequestors = p(EnableDifftestRocketCache).option(IO(Output(UInt(32.W))))
+  difftestCacheRequestors.foreach(_ := dcachePorts.size.U)
   dcacheArb.io.requestor <> dcachePorts.toSeq
   ptw.io.requestor <> ptwPorts.toSeq
 }

@@ -145,6 +145,9 @@ trait HasRocketCoreIO extends HasRocketCoreParameters {
     val fpu = Flipped(new FPUCoreIO())
     val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
     val trace = Output(new TraceBundle)
+    val difftest = p(EnableDifftestRocketCache).option(Output(new RocketCoreObservation(
+      DCacheObservationWidths(xLen, coreDataBits, new HellaCacheReq().tag.getWidth,
+        new HellaCacheReq().cmd.getWidth, new HellaCacheReq().size.getWidth), hartIdLen)))
     val bpwatch = Output(Vec(coreParams.nBreakpoints, new BPWatch(coreParams.retireWidth)))
     val cease = Output(Bool())
     val wfi = Output(Bool())
@@ -1215,6 +1218,72 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   csr.io.counters foreach { c => c.inc := RegNext(perfEvents.evaluate(c.eventSel)) }
 
   val coreMonitorBundle = Wire(new CoreMonitorBundle(xLen, fLen))
+
+  io.difftest.foreach { observation =>
+    val capture = !reset.asBool
+    val allocate = !ctrl_killd
+    val nextToken = RegInit(1.U(64.W))
+    when (allocate) {
+      assert(!nextToken.andR, "Difftest core instruction token exhausted")
+      nextToken := nextToken + 1.U
+    }
+    val exToken = RegEnable(nextToken, allocate)
+    val memToken = RegEnable(exToken, ex_pc_valid)
+    val wbToken = RegEnable(memToken, mem_pc_valid)
+    val exKnown = RegNext(allocate, false.B)
+    val memKnown = RegEnable(exKnown, false.B, ex_pc_valid)
+    val wbKnown = RegEnable(memKnown, false.B, mem_pc_valid)
+
+    observation.hart := io.hartid
+    observation.allocate.valid := capture && allocate
+    observation.allocate.bits.token := nextToken
+    observation.allocate.bits.pc := ibuf.io.pc.asSInt.pad(xLen).asUInt
+    observation.allocate.bits.instruction := id_raw_inst(0)
+    observation.request.valid := capture && io.dmem.req.fire && exKnown
+    observation.request.bits.token := exToken
+    observation.request.bits.tag := io.dmem.req.bits.tag
+    observation.request.bits.command := io.dmem.req.bits.cmd
+    observation.request.bits.size := io.dmem.req.bits.size
+    observation.request.bits.address := io.dmem.req.bits.addr
+    observation.executeKilled.valid := capture && exKnown && ex_pc_valid && ctrl_killx
+    observation.executeKilled.bits := exToken
+    observation.memoryKilled.valid := capture && memKnown && mem_pc_valid && ctrl_killm
+    observation.memoryKilled.bits := memToken
+    observation.writebackRejected.valid := capture && wbKnown && wb_pc_valid && !wb_valid
+    observation.writebackRejected.bits := wbToken
+    observation.retire.valid := capture && wbKnown && wb_valid
+    observation.retire.bits.instruction.token := wbToken
+    observation.retire.bits.instruction.pc := wb_reg_pc.asSInt.pad(xLen).asUInt
+    observation.retire.bits.instruction.instruction := wb_reg_raw_inst
+    observation.retire.bits.integerWrite := wb_wen && !wb_set_sboard && wb_waddr =/= 0.U
+    observation.retire.bits.deferredIntegerWrite := wb_wen && wb_set_sboard && wb_waddr =/= 0.U
+    observation.retire.bits.destination := wb_waddr
+    observation.retire.bits.writeData := rf_wdata
+    observation.retire.bits.memory := wb_ctrl.mem
+    observation.retire.bits.memoryCommand := wb_ctrl.mem_cmd
+    observation.retire.bits.floatingPoint := wb_ctrl.fp
+
+    // The scoreboard prevents destination reuse until this deferred write
+    // completes. Expose unknown late identities rather than guessing a token.
+    val pending = RegInit(VecInit(Seq.fill(32)(false.B)))
+    val pendingTokens = Reg(Vec(32, UInt(64.W)))
+    when (observation.retire.valid && observation.retire.bits.deferredIntegerWrite) {
+      pending(wb_waddr) := true.B
+      pendingTokens(wb_waddr) := wbToken
+    }
+    observation.lateWrite.valid := capture && ll_wen && rf_waddr =/= 0.U
+    observation.lateWrite.bits.token := pendingTokens(rf_waddr)
+    observation.lateWrite.bits.identityKnown := pending(rf_waddr)
+    observation.lateWrite.bits.destination := rf_waddr
+    observation.lateWrite.bits.data := rf_wdata
+    when (observation.lateWrite.valid) { pending(rf_waddr) := false.B }
+    observation.trap.valid := capture && wb_xcpt
+    observation.trap.bits.token := wbToken
+    observation.trap.bits.identityKnown := wbKnown
+    observation.trap.bits.pc := wb_reg_pc.asSInt.pad(xLen).asUInt
+    observation.trap.bits.cause := wb_cause
+    dontTouch(observation)
+  }
 
   coreMonitorBundle.clock := clock
   coreMonitorBundle.reset := reset
