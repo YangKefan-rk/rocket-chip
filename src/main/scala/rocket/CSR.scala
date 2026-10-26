@@ -270,6 +270,7 @@ class CSRFileIO(hasBeu: Boolean)(implicit p: Parameters) extends CoreBundle
   val decode = Vec(decodeWidth, new CSRDecodeIO)
 
   val csr_stall = Output(Bool()) // stall retire for wfi
+  val difftestWfiWakePending = p(EnableDifftestRocketCache).option(Output(Bool()))
   val rw_stall = Output(Bool()) // stall rw, rw will have no effect while rw_stall
   val eret = Output(Bool())
   val trap_return = Output(Bool())
@@ -1021,6 +1022,11 @@ class CSRFile(
 
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1.U, "these conditions must be mutually exclusive")
+
+  io.difftestWfiWakePending.foreach { pending =>
+    pending := pending_interrupts.orR || io.interrupts.debug ||
+      io.interrupts.nmi.map(_.rnmi).getOrElse(false.B) || exception
+  }
 
   when (insn_wfi && !io.singleStep && !reg_debug) { reg_wfi := true.B }
   when (pending_interrupts.orR || io.interrupts.debug || exception) { reg_wfi := false.B }

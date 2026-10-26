@@ -60,5 +60,7 @@ class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) exte
   val lateWrite = Valid(new RocketLateWriteObservation(widths.dataBits))
   // Current registered occupancy; same-edge scoreboard updates appear next cycle.
   val pendingIntegerWriteback = Bool()
+  val pipelineEmpty = Bool()
+  val wfiWakePending = Bool()
   val trap = Valid(new RocketTrapObservation(widths.addressBits, widths.dataBits))
 }
