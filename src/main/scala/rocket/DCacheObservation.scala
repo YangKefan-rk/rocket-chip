@@ -61,6 +61,8 @@ class DCacheDrainObservation(widths: DCacheObservationWidths) extends Bundle {
 // position until the corresponding qualified load result arrives.
 class DCacheObservation(widths: DCacheObservationWidths) extends Bundle {
   val available = Bool()
+  // Local cache quiescence only; fabric and observation delivery close separately.
+  val idle = Bool()
   val request = Valid(new DCacheRequestObservation(widths))
   val s1Rejected = Valid(UInt(64.W))
   val result = Valid(new DCacheResultObservation(widths))

@@ -1135,6 +1135,25 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     cached_grant_wait || uncachedInFlight.asUInt.orR ||
     lrscCount > 0.U || blockProbeAfterGrantCount > 0.U
 
+  io.difftest.foreach { observation =>
+    val requestActive = io.cpu.req.valid || io.tlb_port.req.valid ||
+      s1_valid || s2_valid || s1_tlb_req_valid || s2_tlb_req_valid
+    val storeActive = pstore1_held || pstore2_valid
+    val coherenceActive = s1_probe || s2_probe || release_state =/= s_ready ||
+      s1_release_data_valid || s2_release_data_valid || release_ack_wait || !release_queue_empty ||
+      cached_grant_wait || grantInProgress || uncachedInFlight.asUInt.orR
+    // Check current inputs too: an incoming B may not have reached s1_probe.
+    val linkActive = tl_out_a.valid || tl_out.a.valid || tl_out.b.valid ||
+      tl_out_c.valid || tl_out.c.valid || tl_out.d.valid || tl_out.e.valid
+    val maintenanceActive = reset.asBool || resetting || flushing ||
+      s1_flush_valid || s2_flush_valid_pre_tag_ecc || metaArb.io.out.valid || dataArb.io.out.valid ||
+      !tlb.io.req.ready || io.ptw.req.valid
+    val responseActive = io.cpu.resp.valid || io.cpu.replay_next || doUncachedResp ||
+      io.cpu.uncached_resp.map(_.valid).getOrElse(false.B)
+    observation.idle := !(requestActive || storeActive || coherenceActive ||
+      linkActive || maintenanceActive || responseActive)
+  }
+
   // performance events
   io.cpu.perf.acquire := edge.done(tl_out_a)
   io.cpu.perf.release := edge.done(tl_out_c)
