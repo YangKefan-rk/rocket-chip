@@ -58,5 +58,7 @@ class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) exte
   val writebackRejected = Valid(UInt(64.W))
   val retire = Valid(new RocketRetirementObservation(widths))
   val lateWrite = Valid(new RocketLateWriteObservation(widths.dataBits))
+  // Current registered occupancy; same-edge scoreboard updates appear next cycle.
+  val pendingIntegerWriteback = Bool()
   val trap = Valid(new RocketTrapObservation(widths.addressBits, widths.dataBits))
 }

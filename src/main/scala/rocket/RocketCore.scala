@@ -1271,6 +1271,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     // completes. Expose unknown late identities rather than guessing a token.
     val pending = RegInit(VecInit(Seq.fill(32)(false.B)))
     val pendingTokens = Reg(Vec(32, UInt(64.W)))
+    observation.pendingIntegerWriteback := pending.asUInt.orR
     when (observation.retire.valid && observation.retire.bits.deferredIntegerWrite) {
       pending(wb_waddr) := true.B
       pendingTokens(wb_waddr) := wbToken
