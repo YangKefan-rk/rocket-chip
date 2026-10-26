@@ -1257,6 +1257,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.retire.bits.instruction.token := wbToken
     observation.retire.bits.instruction.pc := wb_reg_pc.asSInt.pad(xLen).asUInt
     observation.retire.bits.instruction.instruction := wb_reg_raw_inst
+    observation.retire.bits.instruction.memory := wb_ctrl.mem
+    observation.retire.bits.instruction.memoryCommand := wb_ctrl.mem_cmd
     observation.retire.bits.integerWrite := wb_wen && !wb_set_sboard && wb_waddr =/= 0.U
     observation.retire.bits.deferredIntegerWrite := wb_wen && wb_set_sboard && wb_waddr =/= 0.U
     observation.retire.bits.destination := wb_waddr
