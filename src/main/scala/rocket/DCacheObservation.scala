@@ -51,6 +51,9 @@ class DCacheStoreObservation(widths: DCacheObservationWidths) extends Bundle {
 
 class DCacheDrainObservation(widths: DCacheObservationWidths) extends Bundle {
   val store = new DCacheStoreObservation(widths)
+  // Actual SRAM byte lanes, including ECC read-modify-write preservation bytes.
+  // store.mask remains the logical-store byte mask.
+  val physicalMask = UInt((widths.dataBits / 8).W)
   val secondSlot = Bool()
   val maintenance = Bool()
 }
@@ -69,6 +72,12 @@ class DCacheObservation(widths: DCacheObservationWidths) extends Bundle {
   val load = Valid(new DCacheLoadObservation(widths))
   val storeAccepted = Valid(new DCacheStoreObservation(widths))
   val storeAdvance = Bool()
+  // Valid on storeAdvance: source pstore1 ID moved into pstore2 at this edge.
+  // A simultaneous drain still names the old pre-edge pstore2 entry.
+  val storeAdvanceRequestId = UInt(64.W)
   val storeMerge = Bool()
+  // Valid on storeMerge: existing pstore2 anchor; incoming ID is storeAccepted.
+  // A merge cannot coincide with a drain or advance.
+  val storeMergeTargetRequestId = UInt(64.W)
   val storeDrain = Valid(new DCacheDrainObservation(widths))
 }

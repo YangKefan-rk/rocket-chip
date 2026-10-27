@@ -608,12 +608,15 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     observation.storeAccepted.bits.data := pstore1_data
     observation.storeAccepted.bits.mask := pstore1_mask
     observation.storeAdvance := advance_pstore1
+    observation.storeAdvanceRequestId := pstore1Id
     observation.storeMerge := pstore1_merge
+    observation.storeMergeTargetRequestId := pstore2Id
     observation.storeDrain.valid := dataArb.io.in(0).fire && dataArb.io.in(0).bits.write
     observation.storeDrain.bits.store.requestId := Mux(pstore2_valid, pstore2Id, pstore1Id)
     observation.storeDrain.bits.store.address := Mux(pstore2_valid, pstore2Paddr, pstore1Paddr)
     observation.storeDrain.bits.store.data := Mux(pstore2_valid, pstore2_storegen_data, pstore1_data)
     observation.storeDrain.bits.store.mask := Mux(pstore2_valid, pstore2_storegen_mask, pstore1_mask)
+    observation.storeDrain.bits.physicalMask := FillInterleaved(eccBytes, dataArb.io.in(0).bits.eccMask)
     observation.storeDrain.bits.secondSlot := pstore2_valid
     observation.storeDrain.bits.maintenance := pstore2_valid && pstore2Maintenance
     dontTouch(observation)
