@@ -586,6 +586,7 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     val pstore2Maintenance = RegEnable(s2_correct, advance_pstore1)
 
     observation.available := true.B
+    observation.eccBytes := eccBytes.U
     observation.request.valid := io.cpu.req.fire
     access(observation.request.bits.access, io.cpu.req.bits, requestId)
     observation.request.bits.arrayRead := dataArb.io.in(3).fire
@@ -609,6 +610,7 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     observation.storeAccepted.bits.mask := pstore1_mask
     observation.storeAdvance := advance_pstore1
     observation.storeAdvanceRequestId := pstore1Id
+    observation.storeAdvanceMaintenance := s2_correct
     observation.storeMerge := pstore1_merge
     observation.storeMergeTargetRequestId := pstore2Id
     observation.storeDrain.valid := dataArb.io.in(0).fire && dataArb.io.in(0).bits.write

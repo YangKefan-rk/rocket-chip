@@ -66,6 +66,8 @@ class DCacheObservation(widths: DCacheObservationWidths) extends Bundle {
   val available = Bool()
   // Local cache quiescence only; fabric and observation delivery close separately.
   val idle = Bool()
+  // Actual selected data ECC granule, in bytes, for private cache collectors.
+  val eccBytes = UInt(4.W)
   val request = Valid(new DCacheRequestObservation(widths))
   val s1Rejected = Valid(UInt(64.W))
   val result = Valid(new DCacheResultObservation(widths))
@@ -75,6 +77,8 @@ class DCacheObservation(widths: DCacheObservationWidths) extends Bundle {
   // Valid on storeAdvance: source pstore1 ID moved into pstore2 at this edge.
   // A simultaneous drain still names the old pre-edge pstore2 entry.
   val storeAdvanceRequestId = UInt(64.W)
+  // True when advance is caused by an ECC correction, not a logical store.
+  val storeAdvanceMaintenance = Bool()
   val storeMerge = Bool()
   // Valid on storeMerge: existing pstore2 anchor; incoming ID is storeAccepted.
   // A merge cannot coincide with a drain or advance.
