@@ -621,6 +621,11 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     observation.storeDrain.bits.physicalMask := FillInterleaved(eccBytes, dataArb.io.in(0).bits.eccMask)
     observation.storeDrain.bits.secondSlot := pstore2_valid
     observation.storeDrain.bits.maintenance := pstore2_valid && pstore2Maintenance
+    // Both effects use the same one-port data array. A successful load reads
+    // through input 3; a physical store drain writes through input 0. A later
+    // S2 load response may coincide with a drain, but its SRAM read did not.
+    assert(!(observation.request.bits.arrayRead && observation.storeDrain.valid),
+      "Difftest cache read and pstore drain cannot fire on one SRAM edge")
     dontTouch(observation)
   }
 
