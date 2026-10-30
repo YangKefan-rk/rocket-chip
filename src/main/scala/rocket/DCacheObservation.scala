@@ -72,6 +72,12 @@ class DCacheObservation(widths: DCacheObservationWidths) extends Bundle {
   val s1Rejected = Valid(UInt(64.W))
   val result = Valid(new DCacheResultObservation(widths))
   val load = Valid(new DCacheLoadObservation(widths))
+  // A successful AMO obtains old data from the earlier request's SRAM read.
+  // The S2 result cycle reports that data, not the SRAM read timestamp.
+  val atomicRead = Valid(new DCacheLoadObservation(widths))
+  // Final AMOALU output, distinct from storeAccepted.data (the right operand).
+  // Its physical publication is still observed separately at storeDrain.
+  val atomicWrite = Valid(new DCacheStoreObservation(widths))
   val storeAccepted = Valid(new DCacheStoreObservation(widths))
   val storeAdvance = Bool()
   // Valid on storeAdvance: source pstore1 ID moved into pstore2 at this edge.

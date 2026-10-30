@@ -603,11 +603,31 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
     access(observation.load.bits.access, s2_req, s2Id)
     observation.load.bits.rawData := io.cpu.resp.bits.data_raw
     observation.load.bits.data := io.cpu.resp.bits.data
+    observation.atomicRead.valid := s2_store_valid && isAMO(s2_req.cmd) &&
+      !s2_uncached && usingAtomicsInCache.B
+    access(observation.atomicRead.bits.access, s2_req, s2Id)
+    observation.atomicRead.bits.rawData := io.cpu.resp.bits.data_raw
+    observation.atomicRead.bits.data := io.cpu.resp.bits.data
+    observation.atomicWrite.valid := observation.atomicRead.valid
+    observation.atomicWrite.bits.requestId := s2Id
+    observation.atomicWrite.bits.address := s2_req.addr
+    observation.atomicWrite.bits.data := pstore1_storegen_data
+    observation.atomicWrite.bits.mask := pstore1_mask
     observation.storeAccepted.valid := s2_store_valid
     observation.storeAccepted.bits.requestId := s2Id
     observation.storeAccepted.bits.address := s2_req.addr
     observation.storeAccepted.bits.data := pstore1_data
     observation.storeAccepted.bits.mask := pstore1_mask
+    when (observation.atomicRead.valid) {
+      assert(observation.result.valid && observation.result.bits.hit &&
+        !observation.result.bits.killed && !observation.result.bits.nacked &&
+        !observation.result.bits.exception, "AMO data requires a successful cache result")
+      assert(observation.storeAccepted.valid &&
+        observation.atomicWrite.bits.requestId === observation.storeAccepted.bits.requestId &&
+        observation.atomicWrite.bits.address === observation.storeAccepted.bits.address &&
+        observation.atomicWrite.bits.mask === observation.storeAccepted.bits.mask,
+        "AMO old and new data must name the same accepted attempt")
+    }
     observation.storeAdvance := advance_pstore1
     observation.storeAdvanceRequestId := pstore1Id
     observation.storeAdvanceMaintenance := s2_correct
