@@ -1266,9 +1266,34 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.retire.bits.memory := wb_ctrl.mem
     observation.retire.bits.memoryCommand := wb_ctrl.mem_cmd
     observation.retire.bits.floatingPoint := wb_ctrl.fp
+    observation.retire.bits.floatingPointWrite := wb_ctrl.wfd
     observation.pipelineEmpty := !(ex_pc_valid || mem_pc_valid || wb_pc_valid)
     observation.wfiWakePending := csr.io.difftestWfiWakePending.get
     observation.mieValue := csr.io.difftestMieValue.get
+    observation.fcsrValue := csr.io.difftestFcsrValue.get
+
+    // Arithmetic tags follow the FPU's own pipeline/divider writeback records.
+    // Load tags follow the committed destination until its actual FPU write.
+    io.fpu.difftestIssueToken.foreach(_ := nextToken)
+    val pendingFpLoads = RegInit(VecInit(Seq.fill(32)(false.B)))
+    val pendingFpLoadTokens = Reg(Vec(32, UInt(64.W)))
+    val fpLoadRetire = wbKnown && wb_valid && wb_ctrl.mem && wb_ctrl.wfd
+    val respondingCurrentFpLoad = fpLoadRetire && dmem_resp_waddr === wb_waddr
+    io.fpu.difftestLoadToken.foreach(_ := Mux(respondingCurrentFpLoad, wbToken,
+        pendingFpLoadTokens(dmem_resp_waddr)))
+    io.fpu.difftestLoadIdentityKnown.foreach(_ := respondingCurrentFpLoad || pendingFpLoads(dmem_resp_waddr))
+    when (fpLoadRetire) {
+      pendingFpLoads(wb_waddr) := true.B
+      pendingFpLoadTokens(wb_waddr) := wbToken
+    }
+    observation.floatingPointWrites := io.fpu.difftestWrites.get
+    for (write <- io.fpu.difftestWrites.get) {
+      when (write.valid && write.bits.identityKnown && pendingFpLoads(write.bits.destination) &&
+            pendingFpLoadTokens(write.bits.destination) === write.bits.token) {
+        pendingFpLoads(write.bits.destination) := false.B
+      }
+    }
+    observation.pendingFloatingPointWriteback := io.fpu.difftestBusy.get || pendingFpLoads.asUInt.orR
 
     // The scoreboard prevents destination reuse until this deferred write
     // completes. Expose unknown late identities rather than guessing a token.

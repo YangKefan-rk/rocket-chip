@@ -272,6 +272,7 @@ class CSRFileIO(hasBeu: Boolean)(implicit p: Parameters) extends CoreBundle
   val csr_stall = Output(Bool()) // stall retire for wfi
   val difftestWfiWakePending = p(EnableDifftestRocketCache).option(Output(Bool()))
   val difftestMieValue = p(EnableDifftestRocketCache).option(Output(UInt(xLen.W)))
+  val difftestFcsrValue = p(EnableDifftestRocketCache).option(Output(UInt(8.W)))
   val rw_stall = Output(Bool()) // stall rw, rw will have no effect while rw_stall
   val eret = Output(Bool())
   val trap_return = Output(Bool())
@@ -691,6 +692,7 @@ class CSRFile(
     reg_scontext.map(r => CSRs.scontext -> r)
 
   val read_fcsr = Cat(reg_frm, reg_fflags)
+  io.difftestFcsrValue.foreach(_ := read_fcsr)
   val fp_csrs = LinkedHashMap[Int,Bits]() ++
     usingFPU.option(CSRs.fflags -> reg_fflags) ++
     usingFPU.option(CSRs.frm -> reg_frm) ++

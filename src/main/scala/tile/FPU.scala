@@ -181,6 +181,11 @@ class FPUDecoder(implicit p: Parameters) extends FPUModule()(p) {
 
 class FPUCoreIO(implicit p: Parameters) extends CoreBundle()(p) {
   val hartid = Input(UInt(hartIdLen.W))
+  val difftestIssueToken = p(EnableDifftestRocketCache).option(Input(UInt(64.W)))
+  val difftestLoadToken = p(EnableDifftestRocketCache).option(Input(UInt(64.W)))
+  val difftestLoadIdentityKnown = p(EnableDifftestRocketCache).option(Input(Bool()))
+  val difftestWrites = p(EnableDifftestRocketCache).option(Output(Vec(2, Valid(new RocketFpWriteObservation))))
+  val difftestBusy = p(EnableDifftestRocketCache).option(Output(Bool()))
   val time = Input(UInt(xLen.W))
 
   val inst = Input(Bits(32.W))
@@ -767,6 +772,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
   val ex_reg_valid = RegNext(io.valid, false.B)
   val ex_reg_inst = RegEnable(io.inst, io.valid)
+  val ex_difftest_token = io.difftestIssueToken.map(token => RegEnable(token, io.valid))
   val ex_reg_ctrl = RegEnable(id_ctrl, io.valid)
   val ex_ra = List.fill(3)(Reg(UInt()))
 
@@ -775,6 +781,8 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   val load_wb_typeTag = RegEnable(io.ll_resp_type(1,0) - typeTagWbOffset, io.ll_resp_val)
   val load_wb_data = RegEnable(io.ll_resp_data, io.ll_resp_val)
   val load_wb_tag = RegEnable(io.ll_resp_tag, io.ll_resp_val)
+  val load_wb_token = io.difftestLoadToken.map(token => RegEnable(token, io.ll_resp_val))
+  val load_wb_identity = io.difftestLoadIdentityKnown.map(known => RegEnable(known, io.ll_resp_val))
 
   class FPUImpl { // entering gated-clock domain
 
@@ -790,6 +798,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   val killx = io.killx || mem_reg_valid && killm
   mem_reg_valid := ex_reg_valid && !killx || ex_cp_valid
   val mem_reg_inst = RegEnable(ex_reg_inst, ex_reg_valid)
+  val mem_difftest_token = ex_difftest_token.map(token => RegEnable(token, ex_reg_valid))
   val wb_reg_valid = RegNext(mem_reg_valid && (!killm || mem_cp_valid), false.B)
 
   val cp_ctrl = Wire(new FPUCtrlSigs)
@@ -897,6 +906,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   val divSqrt_wen = WireDefault(false.B)
   val divSqrt_inFlight = WireDefault(false.B)
   val divSqrt_waddr = Reg(UInt(5.W))
+  val divSqrt_difftest_token = p(EnableDifftestRocketCache).option(Reg(UInt(64.W)))
   val divSqrt_cp = Reg(Bool())
   val divSqrt_typeTag = Wire(UInt(log2Up(floatTypes.size).W))
   val divSqrt_wdata = Wire(UInt((fLen+1).W))
@@ -935,6 +945,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     val typeTag = UInt(log2Up(floatTypes.size).W)
     val cp = Bool()
     val pipeid = UInt(log2Ceil(pipes.size).W)
+    val difftestToken = p(EnableDifftestRocketCache).option(UInt(64.W))
   }
 
   val wen = RegInit(0.U((maxLatency-1).W))
@@ -957,6 +968,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
         wbInfo(i).typeTag := mem_ctrl.typeTagOut
         wbInfo(i).pipeid := pipeid(mem_ctrl)
         wbInfo(i).rd := mem_reg_inst(11,7)
+        wbInfo(i).difftestToken.foreach(_ := mem_difftest_token.get)
       }
     }
   }
@@ -1007,6 +1019,21 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
   io.sboard_set := wb_reg_valid && !wb_cp_valid && RegNext(useScoreboard(_._1.cond(mem_ctrl)) || mem_ctrl.div || mem_ctrl.sqrt || mem_ctrl.vec)
   io.sboard_clr := !wb_cp_valid && (divSqrt_wen || (wen(0) && useScoreboard(x => wbInfo(0).pipeid === x._2.U)))
   io.sboard_clra := waddr
+
+  io.difftestWrites.foreach { writes =>
+    writes(0).valid := !reset.asBool && load_wb
+    writes(0).bits.token := load_wb_token.get
+    writes(0).bits.identityKnown := load_wb_identity.get
+    writes(0).bits.destination := load_wb_tag
+    writes(0).bits.data := ieee(recode(load_wb_data, load_wb_typeTag))
+    writes(1).valid := !reset.asBool && ((!wbInfo(0).cp && wen(0)) || divSqrt_wen)
+    writes(1).bits.token := Mux(divSqrt_wen, divSqrt_difftest_token.get, wbInfo(0).difftestToken.get)
+    writes(1).bits.identityKnown := !wb_cp
+    writes(1).bits.destination := waddr
+    writes(1).bits.data := ieee(wdata)
+  }
+  io.difftestBusy.foreach(_ := ex_reg_valid || mem_reg_valid || wb_reg_valid || wen.orR ||
+      divSqrt_inFlight || load_wb || io.ll_resp_val)
   ccover(io.sboard_clr && load_wb, "DUAL_WRITEBACK", "load and FMA writeback on same cycle")
   // we don't currently support round-max-magnitude (rm=4)
   io.illegal_rm := io.inst(14,12).isOneOf(5.U, 6.U) || io.inst(14,12) === 7.U && io.fcsr_rm >= 5.U
@@ -1016,6 +1043,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     val divSqrt_killed = RegNext(divSqrt_inValid && killm, true.B)
     when (divSqrt_inValid) {
       divSqrt_waddr := mem_reg_inst(11,7)
+      divSqrt_difftest_token.foreach(_ := mem_difftest_token.get)
       divSqrt_cp := mem_cp_valid
     }
 

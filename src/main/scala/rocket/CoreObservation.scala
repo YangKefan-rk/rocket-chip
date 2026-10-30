@@ -31,6 +31,7 @@ class RocketRetirementObservation(widths: DCacheObservationWidths) extends Bundl
   val memory = Bool()
   val memoryCommand = UInt(widths.commandBits.W)
   val floatingPoint = Bool()
+  val floatingPointWrite = Bool()
 }
 
 class RocketLateWriteObservation(dataBits: Int) extends Bundle {
@@ -38,6 +39,13 @@ class RocketLateWriteObservation(dataBits: Int) extends Bundle {
   val identityKnown = Bool()
   val destination = UInt(5.W)
   val data = UInt(dataBits.W)
+}
+
+class RocketFpWriteObservation extends Bundle {
+  val token = UInt(64.W)
+  val identityKnown = Bool()
+  val destination = UInt(5.W)
+  val data = UInt(64.W)
 }
 
 class RocketTrapObservation(addressBits: Int, causeBits: Int) extends Bundle {
@@ -58,6 +66,9 @@ class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) exte
   val writebackRejected = Valid(UInt(64.W))
   val retire = Valid(new RocketRetirementObservation(widths))
   val lateWrite = Valid(new RocketLateWriteObservation(widths.dataBits))
+  val floatingPointWrites = Vec(2, Valid(new RocketFpWriteObservation))
+  val pendingFloatingPointWriteback = Bool()
+  val fcsrValue = UInt(8.W)
   // Current registered occupancy; same-edge scoreboard updates appear next cycle.
   val pendingIntegerWriteback = Bool()
   val pipelineEmpty = Bool()
