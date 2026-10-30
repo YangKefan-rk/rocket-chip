@@ -271,6 +271,7 @@ class CSRFileIO(hasBeu: Boolean)(implicit p: Parameters) extends CoreBundle
 
   val csr_stall = Output(Bool()) // stall retire for wfi
   val difftestWfiWakePending = p(EnableDifftestRocketCache).option(Output(Bool()))
+  val difftestMieValue = p(EnableDifftestRocketCache).option(Output(UInt(xLen.W)))
   val rw_stall = Output(Bool()) // stall rw, rw will have no effect while rw_stall
   val eret = Output(Bool())
   val trap_return = Output(Bool())
@@ -494,7 +495,8 @@ class CSRFile(
   val reg_bp = Reg(Vec(1 << log2Up(nBreakpoints), new BP))
   val reg_pmp = Reg(Vec(nPMPs, new PMPReg))
 
-  val reg_mie = Reg(UInt(xLen.W))
+  val reg_mie = RegInit(0.U(xLen.W))
+  io.difftestMieValue.foreach(_ := reg_mie)
   val (reg_mideleg, read_mideleg) = {
     val reg = Reg(UInt(xLen.W))
     (reg, Mux(usingSupervisor.B, reg & delegable_interrupts | mideleg_always_hs, 0.U))

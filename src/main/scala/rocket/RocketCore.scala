@@ -1268,6 +1268,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.retire.bits.floatingPoint := wb_ctrl.fp
     observation.pipelineEmpty := !(ex_pc_valid || mem_pc_valid || wb_pc_valid)
     observation.wfiWakePending := csr.io.difftestWfiWakePending.get
+    observation.mieValue := csr.io.difftestMieValue.get
 
     // The scoreboard prevents destination reuse until this deferred write
     // completes. Expose unknown late identities rather than guessing a token.

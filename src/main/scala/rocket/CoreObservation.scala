@@ -62,5 +62,7 @@ class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) exte
   val pendingIntegerWriteback = Bool()
   val pipelineEmpty = Bool()
   val wfiWakePending = Bool()
+  // A source-side reset witness; the host checks it before assuming mie=0.
+  val mieValue = UInt(widths.addressBits.W)
   val trap = Valid(new RocketTrapObservation(widths.addressBits, widths.dataBits))
 }
