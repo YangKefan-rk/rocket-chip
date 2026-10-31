@@ -59,6 +59,10 @@ class RocketTrapObservation(addressBits: Int, causeBits: Int) extends Bundle {
 // collector must retain both timestamps and wait for the matching final value.
 class RocketCoreObservation(widths: DCacheObservationWidths, hartBits: Int) extends Bundle {
   val hart = UInt(hartBits.W)
+  // Stop acceptance only closes decode admission; pipeline/cache drain separately.
+  val stopRequested = Bool()
+  val stopAccepted = Bool()
+  val lastAllocationToken = UInt(64.W)
   val allocate = Valid(new RocketInstructionObservation(widths.addressBits, widths.commandBits))
   val request = Valid(new RocketMemoryRequestObservation(widths))
   val executeKilled = Valid(UInt(64.W))

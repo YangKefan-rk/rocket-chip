@@ -234,6 +234,8 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
 
   // Connect the core pipeline to other intra-tile modules
   outer.frontend.module.io.cpu <> core.io.imem
+  val difftestStop = p(EnableDifftestRocketCache).option(IO(Input(Bool())))
+  core.io.difftestStop.zip(difftestStop).foreach { case (input, stop) => input := stop }
   val difftestCoreRequestor = p(EnableDifftestRocketCache).option(IO(Output(UInt(32.W))))
   difftestCoreRequestor.foreach(_ := dcachePorts.size.U)
   dcachePorts += core.io.dmem // TODO outer.dcachePorts += () => module.core.io.dmem ??

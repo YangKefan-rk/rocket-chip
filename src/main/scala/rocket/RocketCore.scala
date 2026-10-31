@@ -145,6 +145,7 @@ trait HasRocketCoreIO extends HasRocketCoreParameters {
     val fpu = Flipped(new FPUCoreIO())
     val rocc = Flipped(new RoCCCoreIO(nTotalRoCCCSRs))
     val trace = Output(new TraceBundle)
+    val difftestStop = p(EnableDifftestRocketCache).option(Input(Bool()))
     val difftest = p(EnableDifftestRocketCache).option(Output(new RocketCoreObservation(
       DCacheObservationWidths(xLen, coreDataBits, new HellaCacheReq().tag.getWidth,
         new HellaCacheReq().cmd.getWidth, new HellaCacheReq().size.getWidth), hartIdLen)))
@@ -163,6 +164,14 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     with HasRocketCoreIO {
   def nTotalRoCCCSRs = tile.roccCSRs.flatten.size
   import ALU._
+
+  // Verification shutdown is sampled on the ungated core clock, including WFI.
+  // Once accepted, it only stops new decode admissions; active stages drain.
+  val difftestStopAccepted = p(EnableDifftestRocketCache).option(RegInit(false.B))
+  difftestStopAccepted.foreach { accepted =>
+    when (io.difftestStop.get) { accepted := true.B }
+  }
+  val difftestStop = io.difftestStop.getOrElse(false.B) || difftestStopAccepted.getOrElse(false.B)
 
   val clock_en_reg = RegInit(true.B)
   val long_latency_stall = Reg(Bool())
@@ -533,9 +542,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   }
 
   ex_reg_valid := !ctrl_killd
-  ex_reg_replay := !take_pc && ibuf.io.inst(0).valid && ibuf.io.inst(0).bits.replay
+  ex_reg_replay := !difftestStop && !take_pc && ibuf.io.inst(0).valid && ibuf.io.inst(0).bits.replay
   ex_reg_xcpt := !ctrl_killd && id_xcpt
-  ex_reg_xcpt_interrupt := !take_pc && ibuf.io.inst(0).valid && csr.io.interrupt
+  ex_reg_xcpt_interrupt := !difftestStop && !take_pc && ibuf.io.inst(0).valid && csr.io.interrupt
 
   when (!ctrl_killd) {
     ex_ctrl := id_ctrl
@@ -591,7 +600,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
       ex_reg_rs_msb(0) := inst >> log2Ceil(bypass_sources.size)
     }
   }
-  when (!ctrl_killd || csr.io.interrupt || ibuf.io.inst(0).bits.replay) {
+  when (!ctrl_killd || !difftestStop && (csr.io.interrupt || ibuf.io.inst(0).bits.replay)) {
     ex_reg_cause := id_cause
     ex_reg_inst := id_inst(0)
     ex_reg_raw_inst := id_raw_inst(0)
@@ -1075,6 +1084,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     id_do_fence ||
     csr.io.csr_stall ||
     id_reg_pause ||
+    difftestStop ||
     io.traceStall
   ctrl_killd := !ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt
 
@@ -1223,7 +1233,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     val capture = !reset.asBool
     val allocate = !ctrl_killd
     val nextToken = RegInit(1.U(64.W))
+    val lastAllocationToken = RegInit(0.U(64.W))
     when (allocate) {
+      lastAllocationToken := nextToken
       assert(!nextToken.andR, "Difftest core instruction token exhausted")
       nextToken := nextToken + 1.U
     }
@@ -1234,6 +1246,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     val memKnown = RegEnable(exKnown, false.B, ex_pc_valid)
     val wbKnown = RegEnable(memKnown, false.B, mem_pc_valid)
 
+    observation.stopRequested := io.difftestStop.get
+    observation.stopAccepted := difftestStopAccepted.get
+    observation.lastAllocationToken := lastAllocationToken
+    assert(!difftestStop || !allocate, "Difftest stop must prevent new instruction admission")
     observation.hart := io.hartid
     observation.allocate.valid := capture && allocate
     observation.allocate.bits.token := nextToken

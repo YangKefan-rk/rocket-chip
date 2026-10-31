@@ -9,6 +9,10 @@
 
 module TestDriver;
 
+`ifdef DIFFTEST_S_NATIVE_TERMINAL
+  import "DPI-C" function bit difftest_s_native_defer_finish();
+`endif
+
   reg clock = 1'b0;
   reg reset = 1'b1;
 
@@ -147,7 +151,11 @@ module TestDriver;
         $fatal;
       end
 
+`ifdef DIFFTEST_S_NATIVE_TERMINAL
+      if (success && !difftest_s_native_defer_finish())
+`else
       if (success)
+`endif
       begin
         if (verbose)
           $fdisplay(stderr, "*** PASSED *** Completed after %d simulation cycles", trace_count);
