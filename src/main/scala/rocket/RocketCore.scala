@@ -1267,9 +1267,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.executeKilled.bits := exToken
     observation.memoryKilled.valid := capture && memKnown && mem_pc_valid && ctrl_killm
     observation.memoryKilled.bits := memToken
-    observation.writebackRejected.valid := capture && wbKnown && wb_pc_valid && !wb_valid
+    // ECALL/EBREAK raise inside CSR even when the writeback pipeline is valid.
+    val csrException = csr.io.trace(0).valid && csr.io.trace(0).exception
+    observation.writebackRejected.valid := capture && wbKnown && wb_pc_valid && (!wb_valid || csrException)
     observation.writebackRejected.bits := wbToken
-    observation.retire.valid := capture && wbKnown && wb_valid
+    observation.retire.valid := capture && wbKnown && wb_valid && !csrException
     observation.retire.bits.instruction.token := wbToken
     observation.retire.bits.instruction.pc := wb_reg_pc.asSInt.pad(xLen).asUInt
     observation.retire.bits.instruction.instruction := wb_reg_raw_inst
@@ -1326,11 +1328,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     observation.lateWrite.bits.destination := rf_waddr
     observation.lateWrite.bits.data := rf_wdata
     when (observation.lateWrite.valid) { pending(rf_waddr) := false.B }
-    observation.trap.valid := capture && wb_xcpt
+    observation.trap.valid := capture && csrException
     observation.trap.bits.token := wbToken
     observation.trap.bits.identityKnown := wbKnown
     observation.trap.bits.pc := wb_reg_pc.asSInt.pad(xLen).asUInt
-    observation.trap.bits.cause := wb_cause
+    observation.trap.bits.cause := csr.io.trace(0).cause
     dontTouch(observation)
   }
 
