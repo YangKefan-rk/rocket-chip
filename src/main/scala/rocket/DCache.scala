@@ -103,6 +103,8 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   require(eccBytes == 1 || !dECC.isInstanceOf[IdentityCode])
   require(cacheParams.silentDrop || cacheParams.acquireBeforeRelease, "!silentDrop requires acquireBeforeRelease")
   val usingRMW = eccBytes > 1 || usingAtomicsInCache
+  require(!p(EnableSfuzzRocketFunctional) || p(EnableDifftestRocketCache),
+    "SFUZZ cache probes require the four-hart Difftest-S observation export")
   require(!p(EnableDifftestRocketCache) || !usingDataScratchpad,
     "Difftest cache observation does not support scratchpad maintenance writes")
   val mmioOffset = outer.firstMMIO
@@ -1021,6 +1023,67 @@ class DCacheModule(outer: DCache) extends HellaCacheModule(outer) {
   val s2_isSlavePortAccess = s2_req.no_xcpt
   io.cpu.ordered := !(s1_valid && !s1_isSlavePortAccess || s2_valid && !s2_isSlavePortAccess || cached_grant_wait || uncachedInFlight.asUInt.orR)
   io.cpu.store_pending := (cached_grant_wait && isWrite(s2_req.cmd)) || uncachedInFlight.asUInt.orR
+
+  // Opt-in SFUZZ observes the L1 source port, without influencing ready or valid.
+  // The TL IDs below are port-local, reusable protocol IDs, not hart IDs or
+  // globally unique dynamic instructions. D/E have no physical address field.
+  io.difftest.zip(observationIds).foreach { case (observation, (_, s1Id, _)) =>
+    observation.sfuzz.foreach { feedback =>
+      require(Seq(tl_out.a.bits.source.getWidth, tl_out.b.bits.source.getWidth,
+        tl_out.c.bits.source.getWidth, tl_out.d.bits.source.getWidth,
+        tl_out.d.bits.sink.getWidth, tl_out.e.bits.sink.getWidth).forall(_ <= 16),
+        "SFUZZ TileLink transaction identifier exceeds observed 16-bit field")
+      require(Seq(tl_out.a.bits.size.getWidth, tl_out.b.bits.size.getWidth,
+        tl_out.c.bits.size.getWidth, tl_out.d.bits.size.getWidth).forall(_ <= 4),
+        "SFUZZ TileLink size exceeds observed 4-bit field")
+      require(Seq(tl_out.a.bits.address.getWidth, tl_out.b.bits.address.getWidth,
+        tl_out.c.bits.address.getWidth).forall(_ <= feedback.a.address.getWidth),
+        "SFUZZ TileLink address exceeds observed cache address field")
+
+      feedback.pstore1Held := pstore1_held
+      feedback.cachedGrantWait := cached_grant_wait
+      feedback.rawNack.valid := s1_valid && !io.cpu.s1_kill && s1_raw_hazard
+      feedback.rawNack.bits.requestId := s1Id
+      feedback.rawNack.bits.address := s1_paddr
+      feedback.rawNack.bits.tag := s1_req.tag
+      feedback.rawNack.bits.command := s1_req.cmd
+      feedback.rawNack.bits.size := s1_req.size
+      feedback.probeOffered := tl_out.b.valid
+      feedback.probeReady := tl_out.b.ready
+      feedback.probeBlockReasons := Cat(block_probe_for_core_progress,
+        block_probe_for_ordering, s1_valid, s2_valid, !metaArb.io.in(6).ready)
+
+      val (aFirst, aLast, _, _) = edge.count(tl_out.a)
+      val (cFirst, cLast, _, _) = edge.count(tl_out.c)
+      def record(out: SfuzzRocketTLFire, fire: Bool, source: UInt, sink: UInt,
+                 address: UInt, opcode: UInt, param: UInt, size: UInt,
+                 first: Bool, last: Bool): Unit = {
+        out.valid := fire
+        out.first := first
+        out.last := last
+        out.source := source
+        out.sink := sink
+        out.address := address
+        out.opcode := opcode
+        out.param := param
+        out.size := size
+      }
+      record(feedback.a, tl_out.a.fire, tl_out.a.bits.source, 0.U,
+        tl_out.a.bits.address, tl_out.a.bits.opcode, tl_out.a.bits.param,
+        tl_out.a.bits.size, aFirst, aLast)
+      record(feedback.b, tl_out.b.fire, tl_out.b.bits.source, 0.U,
+        tl_out.b.bits.address, tl_out.b.bits.opcode, tl_out.b.bits.param,
+        tl_out.b.bits.size, true.B, true.B)
+      record(feedback.c, tl_out.c.fire, tl_out.c.bits.source, 0.U,
+        tl_out.c.bits.address, tl_out.c.bits.opcode, tl_out.c.bits.param,
+        tl_out.c.bits.size, cFirst, cLast)
+      record(feedback.d, tl_out.d.fire, tl_out.d.bits.source, tl_out.d.bits.sink,
+        0.U, tl_out.d.bits.opcode, tl_out.d.bits.param, tl_out.d.bits.size,
+        d_first, d_last)
+      record(feedback.e, tl_out.e.fire, 0.U, tl_out.e.bits.sink,
+        0.U, 0.U, 0.U, 0.U, true.B, true.B)
+    }
+  }
 
   val s1_xcpt_valid = tlb.io.req.valid && !s1_isSlavePortAccess && !s1_nack
   io.cpu.s2_xcpt := Mux(RegNext(s1_xcpt_valid), s2_tlb_xcpt, 0.U.asTypeOf(s2_tlb_xcpt))

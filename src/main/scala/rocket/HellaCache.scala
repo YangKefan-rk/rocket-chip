@@ -63,6 +63,7 @@ case class DCacheParams(
 
 // Optional native observation only; enabling it does not enable a checker.
 case object EnableDifftestRocketCache extends Field[Boolean](false)
+case object EnableSfuzzRocketFunctional extends Field[Boolean](false)
 
 trait HasL1HellaCacheParameters extends HasL1CacheParameters with HasCoreParameters {
   val cacheParams = tileParams.dcache.get
@@ -239,7 +240,8 @@ class HellaCacheBundle(implicit p: Parameters) extends CoreBundle()(p) {
   val tlb_port = new DCacheTLBPort
   val difftest = p(EnableDifftestRocketCache).option(Output(new DCacheObservation(
     DCacheObservationWidths(vaddrBitsExtended max paddrBits, coreDataBits,
-      new HellaCacheReq().tag.getWidth, new HellaCacheReq().cmd.getWidth, new HellaCacheReq().size.getWidth))))
+      new HellaCacheReq().tag.getWidth, new HellaCacheReq().cmd.getWidth, new HellaCacheReq().size.getWidth),
+    p(EnableSfuzzRocketFunctional))))
 }
 
 class HellaCacheModule(outer: HellaCache) extends LazyModuleImp(outer)
